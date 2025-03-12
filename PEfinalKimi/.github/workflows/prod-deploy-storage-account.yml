@@ -1,0 +1,140 @@
+# .github/workflows/prod-deploy-storage-account.yml
+
+name: Production Deployment - Storage Account
+
+on:
+  workflow_dispatch:
+    inputs:
+      subscription:
+        description: 'Subscription'
+        required: true
+        type: choice
+        options:
+          - dbse-p-1
+          - dbsm-p-1
+      resource_group:
+        description: 'Resource Group'
+        required: true
+        type: string
+      storage_account_name:
+        description: 'Storage Account Name'
+        required: true
+        type: string
+      location:
+        description: 'Location'
+        required: true
+        type: string
+      account_kind:
+        description: 'Account Kind'
+        required: true
+        type: choice
+        options:
+          - StorageV2
+          - BlobStorage
+          - FileStorage
+          - BlockBlobStorage
+          - Files
+      account_replication_type:
+        description: 'Account Replication Type'
+        required: true
+        type: choice
+        options:
+          - LRS
+          - GRS
+          - ZRS
+          - RA-GRS
+          - RA-GZRS
+      access_tier:
+        description: 'Access Tier'
+        required: false
+        type: choice
+        options:
+          - Hot
+          - Cool
+      ip_rules:
+        description: 'IP Rules'
+        required: false
+        type: string
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    container:
+      image: ssppaps1arpscr1.azurecr.io/ubuntu2204-build-agent:latest
+      credentials:
+        username: ${{ secrets.AZURE_USERNAME }}
+        password: ${{ secrets.AZURE_PASSWORD }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Set up service principal
+      run: |
+        echo "Using production service principals"
+        echo "ARM_CLIENT_ID=${{ secrets.SP_AZURE_DNAE_PROD_CLIENT_ID }}" >> $GITHUB_ENV
+        echo "ARM_CLIENT_SECRET=${{ secrets.SP_AZURE_DNAE_PROD_CLIENT_SECRET }}" >> $GITHUB_ENV
+        echo "ARM_TENANT_ID=${{ secrets.AZURE_TENANT_ID }}" >> $GITHUB_ENV
+        echo "ARM_SUBSCRIPTION_ID=${{ github.event.inputs.subscription_id }}" >> $GITHUB_ENV
+
+    - name: Create branch
+      run: |
+        git checkout -b "storage-deployment-${{ github.event.inputs.storage_account_name }}"
+
+    - name: Generate JSON configuration
+      run: |
+        ./scripts/generate-config.ps1 `
+          -subscriptionName ${{ inputs.subscription }} `
+          -resourceGroupName ${{ inputs.resource_group }} `
+          -storageAccountName ${{ inputs.storage_account_name }} `
+          -location ${{ inputs.location }} `
+          -accountKind ${{ inputs.account_kind }} `
+          -accountReplicationType ${{ inputs.account_replication_type }} `
+          -accessTier ${{ inputs.access_tier }} `
+          -ipRules ${{ inputs.ip_rules }}
+
+    - name: Verification
+      run: |
+        ./scripts/verification.ps1 `
+          -subscriptionName ${{ inputs.subscription }} `
+          -resourceGroupName ${{ inputs.resource_group }} `
+          -storageAccountName ${{ inputs.storage_account_name }} `
+          -location ${{ inputs.location }} `
+          -accountKind ${{ inputs.account_kind }} `
+          -accountReplicationType ${{ inputs.account_replication_type }} `
+          -accessTier ${{ inputs.access_tier }} `
+          -ipRules ${{ inputs.ip_rules }}
+
+    - name: Call Pipeline Template - Plan
+      uses: ./.github/workflows/pipeline-template.yml
+      with:
+        environment: production
+        subscription: ${{ inputs.subscription }}
+        resource_group: ${{ inputs.resource_group }}
+        resource_type: storage_account
+        resource_name: ${{ inputs.storage_account_name }}
+      secrets: inherit
+
+    - name: Create PR for Approval
+      if: github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'approved'
+      uses: peter-evans/create-pull-request@v3
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        commit-message: 'Apply storage account deployment'
+        title: 'Apply storage account deployment for ${{ inputs.storage_account_name }}'
+        body: 'This PR applies the storage account deployment after approval'
+
+    - name: Call Pipeline Template - Apply
+      if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == 'true'
+      uses: ./.github/workflows/pipeline-template.yml
+      with:
+        environment: production
+        subscription: ${{ inputs.subscription }}
+        resource_group: ${{ inputs.resource_group }}
+        resource_type: storage_account
+        resource_name: ${{ inputs.storage_account_name }}
+      secrets: inherit
+
+    - name: Cleanup
+      run: |
+        git remote set-url origin https://github.com/${{ github.repository }}.git

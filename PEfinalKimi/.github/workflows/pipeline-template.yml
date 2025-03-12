@@ -1,0 +1,214 @@
+name: Pipeline Template
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        type: string
+      subscription:
+        description: 'Subscription'
+        required: true
+        type: string
+      resource_group:
+        description: 'Resource Group'
+        required: true
+        type: string
+      resource_type:
+        description: 'Type of resource to deploy'
+        required: true
+        type: string
+      resource_name:
+        description: 'Resource Name'
+        required: true
+        type: string
+      # Add other common parameters
+    secrets:
+      AZURE_USERNAME:
+        required: true
+      AZURE_PASSWORD:
+        required: true
+      AZURE_TENANT_ID:
+        required: true
+      AZURE_STORAGE_ACCESS_KEY:
+        required: true
+      ENCRYPTION_KEY:
+        required: true
+      SP_AZURE_DNAE_PROD_CLIENT_ID:
+        required: true
+      SP_AZURE_DNAE_PROD_CLIENT_SECRET:
+        required: true
+      SP_DNAE_PRD_CLIENT_ID:
+        required: true
+      SP_DNAE_PRD_CLIENT_SECRET:
+        required: true
+      SP_AZURE_DNAE_NPROD_CLIENT_ID:
+        required: true
+      SP_AZURE_DNAE_NPROD_CLIENT_SECRET:
+        required: true
+      SP_DNAE_NPRD_CLIENT_ID:
+        required: true
+      SP_DNAE_NPRD_CLIENT_SECRET:
+        required: true
+
+jobs:
+  plan:
+    name: Production Plan
+    runs-on: ubuntu-latest
+    container:
+      image: ssppaps1arpscr1.azurecr.io/ubuntu2204-build-agent:latest
+      credentials:
+        username: ${{ secrets.AZURE_USERNAME }}
+        password: ${{ secrets.AZURE_PASSWORD }}
+    
+    steps:
+    - name: Initialize job
+      run: echo "Initializing job..."
+
+    - name: Initialize container
+      run: echo "Initializing container..."
+
+    - name: Checkout resource group @master to s
+      uses: actions/checkout@v2
+
+    - name: Git auth configuration add
+      run: |
+        git remote set-url origin https://${{ secrets.GIT_USERNAME }}:${{ secrets.GIT_PASSWORD }}@github.com/${{ github.repository }}.git
+
+    - name: Install Terraform
+      run: |
+        curl -fsSL https://releases.hashicorp.com/terraform/1.3.6/terraform_1.3.6_linux_amd64.zip -o terraform.zip
+        unzip terraform.zip
+        sudo mv terraform /usr/local/bin/
+
+    - name: Terraform Initialize
+      run: |
+        terraform init \
+          -backend-config="storage_account_name=AZURECENGSA50" \
+          -backend-config="resource_group_name=azure-sa-rg-1" \
+          -backend-config="container_name=tfstate" \
+          -backend-config="key=${{ inputs.subscription }}/${{ inputs.resource_group }}.tfstate" \
+          -backend-config="access_key=${{ secrets.AZURE_STORAGE_ACCESS_KEY }}"
+
+    - name: Terraform Plan
+      run: |
+        if [ "${{ inputs.resource_type }}" = "private_endpoint" ]; then
+          terraform plan -out=tfplan -module=private_endpoint -var-file=config.json
+        elif [ "${{ inputs.resource_type }}" = "resource_group" ]; then
+          terraform plan -out=tfplan -module=resource_group -var-file=config.json
+        elif [ "${{ inputs.resource_type }}" = "storage_account" ]; then
+          terraform plan -out=tfplan -module=storage_account -var-file=config.json
+        elif [ "${{ inputs.resource_type }}" = "sql_server" ]; then
+          terraform plan -out=tfplan -module=sql_server -var-file=config.json
+        fi
+      env:
+        ARM_CLIENT_ID: ${{ secrets.SP_AZURE_DNAE_PROD_CLIENT_ID }}
+        ARM_CLIENT_SECRET: ${{ secrets.SP_AZURE_DNAE_PROD_CLIENT_SECRET }}
+        ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        ARM_SUBSCRIPTION_ID: ${{ inputs.subscription }}
+        AZURE_USERNAME: ${{ secrets.AZURE_USERNAME }}
+        AZURE_PASSWORD: ${{ secrets.AZURE_PASSWORD }}
+        AZURE_STORAGE_ACCESS_KEY: ${{ secrets.AZURE_STORAGE_ACCESS_KEY }}
+        ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+
+    - name: Encrypt Plan File
+      run: |
+        openssl enc -aes-256-cbc -salt -in tfplan -out tfplan.enc -k ${{ secrets.ENCRYPTION_KEY }}
+        rm tfplan
+
+    - name: Copy file to artifact
+      uses: actions/upload-artifact@v2
+      with:
+        name: tfplan
+        path: tfplan.enc
+
+    - name: Public artifact tfplan
+      run: echo "Artifact published"
+
+    - name: Git auth configuration remove
+      run: |
+        git remote set-url origin https://github.com/${{ github.repository }}.git
+
+    - name: Post job check out resource group @master to s
+      run: echo "Post job checkout..."
+
+    - name: Stop containers
+      run: echo "Stopping containers..."
+
+    - name: Finalize job
+      run: echo "Finalizing job..."
+
+  apply:
+    name: Production Apply
+    runs-on: ubuntu-latest
+    container:
+      image: ssppaps1arpscr1.azurecr.io/ubuntu2204-build-agent:latest
+      credentials:
+        username: ${{ secrets.AZURE_USERNAME }}
+        password: ${{ secrets.AZURE_PASSWORD }}
+    needs: plan
+    
+    steps:
+    - name: Initialize job
+      run: echo "Initializing job..."
+
+    - name: Initialize container
+      run: echo "Initializing container..."
+
+    - name: Checkout resource group @master to s
+      uses: actions/checkout@v2
+
+    - name: Git auth configuration add
+      run: |
+        git remote set-url origin https://${{ secrets.GIT_USERNAME }}:${{ secrets.GIT_PASSWORD }}@github.com/${{ github.repository }}.git
+
+    - name: Install Terraform
+      run: |
+        curl -fsSL https://releases.hashicorp.com/terraform/1.3.6/terraform_1.3.6_linux_amd64.zip -o terraform.zip
+        unzip terraform.zip
+        sudo mv terraform /usr/local/bin/
+
+    - name: Download TF Plan Artifact
+      uses: actions/download-artifact@v2
+      with:
+        name: tfplan
+        path: .
+
+    - name: Decrypt Plan File
+      run: |
+        openssl enc -d -aes-256-cbc -in tfplan.enc -out tfplan -k ${{ secrets.ENCRYPTION_KEY }}
+
+    - name: Terraform Initialize
+      run: |
+        terraform init \
+          -backend-config="storage_account_name=AZURECENGSA50" \
+          -backend-config="resource_group_name=azure-sa-rg-1" \
+          -backend-config="container_name=tfstate" \
+          -backend-config="key=${{ inputs.subscription }}/${{ inputs.resource_group }}.tfstate" \
+          -backend-config="access_key=${{ secrets.AZURE_STORAGE_ACCESS_KEY }}"
+
+    - name: Terraform Apply
+      run: terraform apply tfplan
+      env:
+        ARM_CLIENT_ID: ${{ secrets.SP_DNAE_PRD_CLIENT_ID }}
+        ARM_CLIENT_SECRET: ${{ secrets.SP_DNAE_PRD_CLIENT_SECRET }}
+        ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        ARM_SUBSCRIPTION_ID: ${{ inputs.subscription }}
+        AZURE_USERNAME: ${{ secrets.AZURE_USERNAME }}
+        AZURE_PASSWORD: ${{ secrets.AZURE_PASSWORD }}
+        AZURE_STORAGE_ACCESS_KEY: ${{ secrets.AZURE_STORAGE_ACCESS_KEY }}
+        ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+
+    - name: Git auth config remove
+      run: |
+        git remote set-url origin https://github.com/${{ github.repository }}.git
+
+    - name: Post job check out
+      run: echo "Post job checkout..."
+
+    - name: Stop containers
+      run: echo "Stopping containers..."
+
+    - name: Finalize job
+      run: echo "Finalizing job..."

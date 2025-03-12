@@ -1,0 +1,128 @@
+# .github/workflows/prod-deploy-sql-server.yml
+
+name: Production Deployment - SQL Server
+
+on:
+  workflow_dispatch:
+    inputs:
+      subscription:
+        description: 'Subscription'
+        required: true
+        type: choice
+        options:
+          - dbse-p-1
+          - dbsm-p-1
+      resource_group:
+        description: 'Resource Group'
+        required: true
+        type: string
+      sql_server_name:
+        description: 'SQL Server Name'
+        required: true
+        type: string
+      location:
+        description: 'Location'
+        required: true
+        type: string
+      administrator_login:
+        description: 'Administrator Login'
+        required: true
+        type: string
+      administrator_password:
+        description: 'Administrator Password'
+        required: true
+        type: string
+      version:
+        description: 'SQL Server Version'
+        required: true
+        type: choice
+        options:
+          - '12.0'
+          - '14.0'
+          - '15.0'
+      storage_size:
+        description: 'Storage Size (GB)'
+        required: true
+        type: string
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    container:
+      image: ssppaps1arpscr1.azurecr.io/ubuntu2204-build-agent:latest
+      credentials:
+        username: ${{ secrets.AZURE_USERNAME }}
+        password: ${{ secrets.AZURE_PASSWORD }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Set up service principal
+      run: |
+        echo "Using production service principals"
+        echo "ARM_CLIENT_ID=${{ secrets.SP_AZURE_DNAE_PROD_CLIENT_ID }}" >> $GITHUB_ENV
+        echo "ARM_CLIENT_SECRET=${{ secrets.SP_AZURE_DNAE_PROD_CLIENT_SECRET }}" >> $GITHUB_ENV
+        echo "ARM_TENANT_ID=${{ secrets.AZURE_TENANT_ID }}" >> $GITHUB_ENV
+        echo "ARM_SUBSCRIPTION_ID=${{ github.event.inputs.subscription_id }}" >> $GITHUB_ENV
+
+    - name: Create branch
+      run: |
+        git checkout -b "sql-deployment-${{ github.event.inputs.sql_server_name }}"
+
+    - name: Generate JSON configuration
+      run: |
+        ./scripts/generate-config.ps1 `
+          -subscriptionName ${{ inputs.subscription }} `
+          -resourceGroupName ${{ inputs.resource_group }} `
+          -sqlServerName ${{ inputs.sql_server_name }} `
+          -location ${{ inputs.location }} `
+          -administratorLogin ${{ inputs.administrator_login }} `
+          -administratorPassword ${{ inputs.administrator_password }} `
+          -version ${{ inputs.version }} `
+          -storageSize ${{ inputs.storage_size }}
+
+    - name: Verification
+      run: |
+        ./scripts/verification.ps1 `
+          -subscriptionName ${{ inputs.subscription }} `
+          -resourceGroupName ${{ inputs.resource_group }} `
+          -sqlServerName ${{ inputs.sql_server_name }} `
+          -location ${{ inputs.location }} `
+          -administratorLogin ${{ inputs.administrator_login }} `
+          -version ${{ inputs.version }} `
+          -storageSize ${{ inputs.storage_size }}
+
+    - name: Call Pipeline Template - Plan
+      uses: ./.github/workflows/pipeline-template.yml
+      with:
+        environment: production
+        subscription: ${{ inputs.subscription }}
+        resource_group: ${{ inputs.resource_group }}
+        resource_type: sql_server
+        resource_name: ${{ inputs.sql_server_name }}
+      secrets: inherit
+
+    - name: Create PR for Approval
+      if: github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'approved'
+      uses: peter-evans/create-pull-request@v3
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        commit-message: 'Apply SQL Server deployment'
+        title: 'Apply SQL Server deployment for ${{ inputs.sql_server_name }}'
+        body: 'This PR applies the SQL Server deployment after approval'
+
+    - name: Call Pipeline Template - Apply
+      if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == 'true'
+      uses: ./.github/workflows/pipeline-template.yml
+      with:
+        environment: production
+        subscription: ${{ inputs.subscription }}
+        resource_group: ${{ inputs.resource_group }}
+        resource_type: sql_server
+        resource_name: ${{ inputs.sql_server_name }}
+      secrets: inherit
+
+    - name: Cleanup
+      run: |
+        git remote set-url origin https://github.com/${{ github.repository }}.git

@@ -1,0 +1,134 @@
+# .github/workflows/prod-deploy-private-endpoint.yml
+
+name: Production Deployment - Private Endpoint
+
+on:
+  workflow_dispatch:
+    inputs:
+      subscription:
+        description: 'Subscription'
+        required: true
+        type: choice
+        options:
+          - dbse-p-1
+          - dbsm-p-1
+      resource_group:
+        description: 'Resource Group'
+        required: true
+        type: string
+      vnet_name:
+        description: 'VNet Name'
+        required: true
+        type: choice
+        options:
+          - dbse-p-vnet1
+          - dbse-p-vnet2
+          - dbse-p-vnet3
+          - dbsm-p-vnet1
+          - dbsm-p-vnet2
+          - dbsm-p-vnet3
+      subnet_name:
+        description: 'Subnet Name'
+        required: true
+        type: string
+      resource_type:
+        description: 'Resource Type'
+        required: true
+        type: choice
+        options:
+          - Storage Account
+          - Cosmos DB
+          - Key Vault
+          - SQL
+          - Data Factory
+          - Search Service
+      subresource_name:
+        description: 'Sub Resource Name'
+        required: true
+        type: choice
+        options: [blob, Vault, sql, file, table, queue, mongodb, search, factory]
+      resource_name:
+        description: 'Resource Name'
+        required: true
+        type: string
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    container:
+      image: ssppaps1arpscr1.azurecr.io/ubuntu2204-build-agent:latest
+      credentials:
+        username: ${{ secrets.AZURE_USERNAME }}
+        password: ${{ secrets.AZURE_PASSWORD }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Set up service principal
+      run: |
+        echo "Using production service principals"
+        echo "ARM_CLIENT_ID=${{ secrets.SP_AZURE_DNAE_PROD_CLIENT_ID }}" >> $GITHUB_ENV
+        echo "ARM_CLIENT_SECRET=${{ secrets.SP_AZURE_DNAE_PROD_CLIENT_SECRET }}" >> $GITHUB_ENV
+        echo "ARM_TENANT_ID=${{ secrets.AZURE_TENANT_ID }}" >> $GITHUB_ENV
+        echo "ARM_SUBSCRIPTION_ID=${{ github.event.inputs.subscription_id }}" >> $GITHUB_ENV
+
+    - name: Create branch
+      run: |
+        git checkout -b "pe-deployment-${{ github.event.inputs.resource_name }}"
+
+    - name: Generate JSON configuration
+      run: |
+        ./scripts/private_endpoint/generate-config.ps1 `
+          -subscriptionName ${{ inputs.subscription }} `
+          -resourceGroupName ${{ inputs.resource_group }} `
+          -vnetName ${{ inputs.vnet_name }} `
+          -subnetName ${{ inputs.subnet_name }} `
+          -resourceType ${{ inputs.resource_type }} `
+          -subResourceName ${{ inputs.subresource_name }} `
+          -resourceName ${{ inputs.resource_name }}
+
+    - name: Verification
+      run: |
+        ./scripts/private_endpoint/verification.ps1 `
+          -subscriptionName ${{ inputs.subscription }} `
+          -resourceGroupName ${{ inputs.resource_group }} `
+          -vnetName ${{ inputs.vnet_name }} `          -subnetName ${{ inputs.subnet_name }} `
+
+          -resourceType ${{ inputs.resource_type }} `
+          -subResourceName ${{ inputs.subresource_name }} `
+          -resourceName ${{ inputs.resource_name }}
+
+    - name: Call Pipeline Template - Plan
+      uses: ./.github/workflows/pipeline-template.yml
+      with:
+        environment: production
+        subscription: ${{ inputs.subscription }}
+        resource_group: ${{ inputs.resource_group }}
+        resource_type: private_endpoint
+        resource_name: ${{ inputs.resource_name }}
+      secrets: inherit
+
+    - name: Create PR for Approval
+      if: github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'approved'
+      uses: peter-evans/create-pull-request@v3
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        commit-message: 'Apply private endpoint deployment'
+        title: 'Apply private endpoint deployment for ${{ inputs.resource_name }}'
+        body: 'This PR applies the private endpoint deployment after approval'
+
+    - name: Call Pipeline Template - Apply
+      if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == 'true'
+      uses: ./.github/workflows/pipeline-template.yml
+      with:
+        environment: production
+        subscription: ${{ inputs.subscription }}
+        resource_group: ${{ inputs.resource_group }}
+        resource_type: private_endpoint
+        resource_name: ${{ inputs.resource_name }}
+      secrets: inherit
+
+    - name: Cleanup
+      run: |
+        git remote set-url origin https://github.com/${{ github.repository }}.git

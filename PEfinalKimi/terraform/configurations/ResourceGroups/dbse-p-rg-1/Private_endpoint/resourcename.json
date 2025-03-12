@@ -1,0 +1,16 @@
+{
+    "subscription": "dbse-p-1",
+    "subscription_id": "00000000-0000-0000-0000-000000000000",
+    "resource_group": "resource_group_1",
+    "resource_group_id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/resource_group_1",
+    "vnet_name": "dbse-p-vnet1",
+    "subnet_name": "private-subnet",
+    "subnet_id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/dbse-p-rg-1/providers/Microsoft.Network/virtualNetworks/dbse-p-vnet1/subnets/private-subnet",
+    "resource_type": "Storage Account",
+    "subresource_name": "Blob",
+    "resource_name": "mystorageaccount",
+    "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/resource_group_1/providers/Microsoft.Storage/storageAccounts/mystorageaccount",
+    "private_dns_zone_id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/Azure-p-100-azure-rg-100/providers/Microsoft.Network/privateDnsZones/privatelink.blob.core.windows.net",
+    "static_ips": ["10.0.0.10"],
+    "location": "eastus"
+  }
