@@ -1,0 +1,5 @@
+steps:
+  - script: |
+      git config --global --unset "http.extraHeader"
+    condition: always()
+    displayName: Git Auth Config Remove

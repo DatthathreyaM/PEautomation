@@ -1,0 +1,4 @@
+steps:
+  - script: |
+      git config --global "http.extraHeader" "Authorization: Bearer $(System.AccessToken)"
+    displayName: Git Auth Config Add

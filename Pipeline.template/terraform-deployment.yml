@@ -1,0 +1,194 @@
+parameters:
+  - name: workingDirectory
+    type: string
+    default: ""
+  - name: stage
+    type: string
+  - name: terraformVersion
+    type: string
+    default: 1.3.6
+  - name: stateFile
+    type: string
+    default: ""
+  - name: args
+    type: string
+    default: ""
+  - name: planArgs
+    type: string
+    default: ""
+  - name: prePlanSteps
+    type: stepList
+    default: []
+  - name: postPlanSteps
+    type: stepList
+    default: []
+  - name: preApplySteps
+    type: stepList
+    default: []
+  - name: postApplySteps
+    type: stepList
+    default: []
+  - name: timeoutInMinutes
+    type: number
+    default: 240
+  - name: bypassHours
+    type: boolean
+    default: false
+  - name: image_name
+    type: string
+    default: ubuntu2204-build-agent
+  - name: image_version
+    type: string
+    default: latest
+  - name: variables
+    type: object
+    default: {}
+  - name: tfArtifactSecret
+    type: string
+    default: $(azure.tfencrypt_secret)
+  - name: env
+    type: object
+    default:
+      All:
+        SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+        AGENT_TEMP_DIRECTORY: $(Agent.TempDirectory)
+        BUILD_ID: $(Build.BuildId)
+        COMMIT_ID: $(Build.SourceVersion)
+        ARM_SKIP_PROVIDER_REGISTRATION: 1
+        ARM_TENANT_ID: $(azure.first_american_tenant_id)
+        TF_VAR_PA_ADMIN_USER_NAME: $(palo_alto.admin_user_name)
+        TF_VAR_PA_ADMIN_USER_PASSWORD: $(palo_alto.admin_user_password)
+        TF_VAR_AD_JOIN_USERNAME: $(azure.ad_join_username)
+        TF_VAR_AD_JOIN_PASSWORD: $(azure.ad_join_password)
+      Production:
+        STAGE_POOL: ARPS-PROD
+        STAGE_ACR: ARPS-ACR-PROD
+        STAGE_IMAGE: ssppaps1arpscr1.azurecr.io
+        ARM_CLIENT_ID: $(azure.client_id)
+        ARM_CLIENT_SECRET: $(azure.client_secret)
+      Non-Production:
+        STAGE_POOL: ARPS-NP
+        STAGE_ACR: ARPS-ACR-PROD
+        STAGE_IMAGE: ssppaps1arpscr1.azurecr.io
+        ARM_CLIENT_ID: $(azure.np_client_id)
+        ARM_CLIENT_SECRET: $(azure.np_client_secret)
+      Sandbox:
+        STAGE_POOL: ARPS-NP
+        STAGE_ACR: ARPS-ACR-PROD
+        STAGE_IMAGE: ssppaps1arpscr1.azurecr.io
+        ARM_CLIENT_ID: $(azure.s_client_id)
+        ARM_CLIENT_SECRET: $(azure.s_client_secret)
+
+stages:
+  - stage: ${{ replace(parameters.stage, '-', '_') }}Plan
+    displayName: ${{ parameters.stage }} Plan
+    variables:
+      - group: "First American Tenant Service Principal Variables"
+      - group: "Palo Alto Firewall Variables"
+      - ${{ each variable in parameters.variables }}:
+        - ${{ each pair in variable }}:
+            ${{ pair.key }}: ${{ pair.value }}
+    jobs:
+      - job: Plan
+        pool:
+          name: ${{ parameters.env[parameters.stage].STAGE_POOL }}
+        container:
+          image: ${{ parameters.env[parameters.stage].STAGE_IMAGE }}/${{ parameters.image_name }}:${{ parameters.image_version }}
+          endpoint: ${{ parameters.env[parameters.stage].STAGE_ACR }}
+        timeoutInMinutes: ${{ parameters.timeoutInMinutes }}
+        workspace:
+          clean : all
+        steps:
+          - template: git-auth-add.yml
+
+          - task: ms-devlabs.custom-terraform-tasks.custom-terraform-installer-task.TerraformInstaller@1
+            displayName: Install Terraform
+            inputs:
+              terraformVersion: ${{ parameters.terraformVersion }}  
+
+          - template: terraform-init.yml
+            parameters:
+              workingDirectory: ${{ parameters.workingDirectory }}
+              stage: ${{ parameters.stage }}
+              env: ${{ parameters.env }}
+              stateFile: ${{ parameters.stateFile }}
+
+          - ${{ each step in parameters.prePlanSteps }}:
+            - ${{ each pair in step }}:
+                ${{ pair.key }}: ${{ pair.value }}
+
+          - template: terraform-plan.yml
+            parameters:
+              workingDirectory: ${{ parameters.workingDirectory }}
+              stage: ${{ parameters.stage }}
+              env: ${{ parameters.env }}
+              args: ${{ parameters.args }}
+              planArgs: ${{ parameters.planArgs }}
+              artifactSecret: ${{ parameters.tfArtifactSecret }}
+
+          - ${{ each step in parameters.postPlanSteps }}:
+            - ${{ each pair in step }}:
+                ${{ pair.key }}: ${{ pair.value }}
+
+          - template: git-auth-remove.yml
+
+  - stage: ${{ replace(parameters.stage, '-', '_') }}Apply
+    displayName: ${{ parameters.stage }} Apply
+    condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))
+    variables:
+      - group: "First American Tenant Service Principal Variables"
+      - group: "Palo Alto Firewall Variables"
+      - ${{ each variable in parameters.variables }}:
+        - ${{ each pair in variable }}:
+            ${{ pair.key }}: ${{ pair.value }}
+    jobs:
+      - deployment: Apply
+        ${{ if parameters.bypassHours }}:
+          environment: ${{ parameters.stage }}-NoHours
+        ${{ else }}:
+          environment: ${{ parameters.stage }}
+        pool:
+          name: ${{ parameters.env[parameters.stage].STAGE_POOL }}
+        container:
+          image: ${{ parameters.env[parameters.stage].STAGE_IMAGE }}/${{ parameters.image_name }}:${{ parameters.image_version }}
+          endpoint: ${{ parameters.env[parameters.stage].STAGE_ACR }}
+        timeoutInMinutes: ${{ parameters.timeoutInMinutes }}
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                
+                - template: git-auth-add.yml
+
+                - task: ms-devlabs.custom-terraform-tasks.custom-terraform-installer-task.TerraformInstaller@1
+                  displayName: Install Terraform
+                  inputs:
+                    terraformVersion: ${{ parameters.terraformVersion }}
+
+                - ${{ each step in parameters.preApplySteps }}:
+                  - ${{ each pair in step }}:
+                      ${{ pair.key }}: ${{ pair.value }}
+
+                - template: terraform-apply.yml
+                  parameters:
+                    workingDirectory: ${{ parameters.workingDirectory }}
+                    stage: ${{ parameters.stage }}
+                    env: ${{ parameters.env }}
+                    args: ${{ parameters.args }}
+                    stateFile: ${{ parameters.stateFile }}
+                    artifactSecret: ${{ parameters.tfArtifactSecret }}
+
+                - ${{ each step in parameters.postApplySteps }}:
+                  - ${{ each pair in step }}:
+                      ${{ pair.key }}: ${{ pair.value }}
+
+                - template: inspec-test.yml
+                  parameters:
+                    workingDirectory: ${{ parameters.workingDirectory }}
+                    stage: ${{ parameters.stage }}
+                    env: ${{ parameters.env }}
+
+                - template: git-auth-remove.yml
+
+

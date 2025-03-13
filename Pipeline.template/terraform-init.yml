@@ -1,0 +1,37 @@
+parameters:
+  - name: workingDirectory
+    type: string
+  - name: stage
+    type: string
+  - name: env
+    type: object
+  - name: stateFile
+    type: string
+    default: ""
+
+steps:
+  - pwsh: |
+      $init = 'terraform init -input=false'
+
+      if ("${{ parameters.stateFile }}") {
+        $init += ' -backend-config="key=${{ parameters.stateFile }}"'
+      }
+
+      Invoke-Expression $init
+    displayName: Terraform Init
+    workingDirectory: $(Build.SourcesDirectory)/${{ parameters.workingDirectory }}
+    env:
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+      AGENT_TEMP_DIRECTORY: $(Agent.TempDirectory)
+      BUILD_ID: $(Build.BuildId)
+      COMMIT_ID: $(Build.SourceVersion)
+      ARM_SKIP_PROVIDER_REGISTRATION: 1
+      ARM_TENANT_ID: $(azure.first_american_tenant_id)
+      TF_VAR_PA_ADMIN_USER_NAME: $(palo_alto.admin_user_name)
+      TF_VAR_PA_ADMIN_USER_PASSWORD: $(palo_alto.admin_user_password)
+      TF_VAR_AD_JOIN_USERNAME: $(azure.ad_join_username)
+      TF_VAR_AD_JOIN_PASSWORD: $(azure.ad_join_password)
+      ARM_CLIENT_ID: ${{ parameters.env[parameters.stage].ARM_CLIENT_ID }}
+      ARM_CLIENT_SECRET: ${{ parameters.env[parameters.stage].ARM_CLIENT_SECRET }}
+      ${{ insert }}: ${{ parameters.env['All'] }}
+      ${{ insert }}: ${{ parameters.env[parameters.stage] }}

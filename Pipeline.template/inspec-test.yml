@@ -1,0 +1,81 @@
+parameters:
+  - name: workingDirectory
+    type: string
+  - name: stage
+    type: string
+  - name: env
+    type: object
+
+steps:
+- pwsh: |
+    if (Test-Path -Path "inspec.yml") {
+      echo "##vso[task.setvariable variable=tests]true"
+    } else {
+      echo "##vso[task.setvariable variable=tests]false"
+    }
+  displayName: Should we test?
+  workingDirectory: $(Build.SourcesDirectory)/${{ parameters.workingDirectory }}
+
+- script: gem install cinc-auditor-bin --clear-sources -s https://packagecloud.io/cinc-project/stable -s https://rubygems.org -v 4.50.3
+  condition: and(succeeded(), eq(variables.tests, 'true'))
+  displayName: Install Cinc Auditor
+
+- pwsh: |
+    # Establish subscription ID from main.tf
+    $subscriptionId = $(Select-String -Path "main.tf" -Pattern "subscription_id")[1].Line.Split("=")[1].Trim().Replace("`"", "")
+
+    # cinc-auditor requires environment variables set for connection
+    $env:AZURE_TENANT_ID = $env:ARM_TENANT_ID
+    $env:AZURE_CLIENT_ID = $env:ARM_CLIENT_ID
+    $env:AZURE_CLIENT_SECRET = $env:ARM_CLIENT_SECRET
+    $env:AZURE_SUBSCRIPTION_ID = $subscriptionId
+
+    # Gather all valid .rb test files from utilized terraform modules
+    $testFiles = $(Get-ChildItem -Path ".terraform" -Filter "*.rb" -Recurse -File -Name) | Where-Object { !$(Split-Path $_).Contains(".") }
+
+    # Create "controls" directory if does not exist
+    New-Item "controls" -ItemType Directory -ea 0 | Out-Null
+
+    # Copy each valid test file into deployment "controls" directory
+    foreach ($file in $testFiles) {
+      Copy-Item ".terraform/$file" -Destination "controls/"
+    }
+
+    # Create files directory if it does not exist
+    New-Item "files" -ItemType Directory -ea 0 | Out-Null
+
+    # Terraform outputs to json
+    # Using System.IO.File to ensure UTF8 No-BOM file
+    [System.IO.File]::WriteAllLines("$pwd/files/output.json", $(terraform output -json))
+
+    # Get current directory name for test results
+    $rg = Split-Path $pwd -Leaf
+
+    # Execute test set
+    cinc-auditor exec . -t azure:// --reporter cli junit:"TEST-$rg.xml"
+  condition: and(succeeded(), eq(variables.tests, 'true'))
+  displayName: Execute Cinc-Auditor Test Set
+  workingDirectory: $(Build.SourcesDirectory)/${{ parameters.workingDirectory }}
+  env:
+    ${{ insert }}: ${{ parameters.env['All'] }}
+    ${{ insert }}: ${{ parameters.env[parameters.stage] }}
+    SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+    AGENT_TEMP_DIRECTORY: $(Agent.TempDirectory)
+    BUILD_ID: $(Build.BuildId)
+    COMMIT_ID: $(Build.SourceVersion)
+    ARM_SKIP_PROVIDER_REGISTRATION: 1
+    ARM_TENANT_ID: $(azure.first_american_tenant_id)
+    TF_VAR_PA_ADMIN_USER_NAME: $(palo_alto.admin_user_name)
+    TF_VAR_PA_ADMIN_USER_PASSWORD: $(palo_alto.admin_user_password)
+    TF_VAR_AD_JOIN_USERNAME: $(azure.ad_join_username)
+    TF_VAR_AD_JOIN_PASSWORD: $(azure.ad_join_password)
+    ARM_CLIENT_ID: ${{ parameters.env[parameters.stage].ARM_CLIENT_ID }}
+    ARM_CLIENT_SECRET: ${{ parameters.env[parameters.stage].ARM_CLIENT_SECRET }}
+
+- task: PublishTestResults@2
+  displayName: "Publish Test Results"
+  condition: and(succeeded(), eq(variables.tests, 'true'))
+  inputs:
+    testResultsFiles: "**/TEST-*.xml"
+    searchFolder: $(Build.SourcesDirectory)/${{ parameters.workingDirectory }}
+

@@ -1,0 +1,53 @@
+parameters:
+  - name: workingDirectory
+    type: string
+  - name: stage
+    type: string
+  - name: env
+    type: object
+  - name: args
+    type: string
+    default: ""
+  - name: artifactSecret
+    type: string
+  - name: stateFile
+    type: string
+
+steps:
+  - task: DownloadPipelineArtifact@2
+    displayName: Download TF Plan Artifact
+    inputs:
+      artifactName: tfplan_$(Build.BuildNumber)_$(System.StageAttempt)
+      path: $(Build.SourcesDirectory)/${{ parameters.workingDirectory }}
+
+  - pwsh: |
+      openssl enc -aes-256-cbc -md sha512 -pbkdf2 -iter 100000 -d -in 'plan_output_$(Build.BuildNumber)_$(System.StageAttempt).tfpln.enc' -out plan_output_'$(Build.BuildNumber)_$(System.StageAttempt).tfpln' -k '${{ parameters.artifactSecret }}'
+    displayName: Decrypt plan file
+    workingDirectory: $(Build.SourcesDirectory)/${{ parameters.workingDirectory }}
+
+  - template: terraform-init.yml
+    parameters:
+      workingDirectory: ${{ parameters.workingDirectory }}
+      stage: ${{ parameters.stage }}
+      env: ${{ parameters.env }}
+      stateFile: ${{ parameters.stateFile }}
+
+  - script: terraform apply -input=false -auto-approve ${{ parameters.args }} 'plan_output_$(Build.BuildNumber)_$(System.StageAttempt).tfpln'
+    displayName: Terraform Apply
+    workingDirectory: $(Build.SourcesDirectory)/${{ parameters.workingDirectory }}
+    env:
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+      AGENT_TEMP_DIRECTORY: $(Agent.TempDirectory)
+      BUILD_ID: $(Build.BuildId)
+      COMMIT_ID: $(Build.SourceVersion)
+      ARM_SKIP_PROVIDER_REGISTRATION: 1
+      ARM_TENANT_ID: $(azure.first_american_tenant_id)
+      TF_VAR_PA_ADMIN_USER_NAME: $(palo_alto.admin_user_name)
+      TF_VAR_PA_ADMIN_USER_PASSWORD: $(palo_alto.admin_user_password)
+      TF_VAR_AD_JOIN_USERNAME: $(azure.ad_join_username)
+      TF_VAR_AD_JOIN_PASSWORD: $(azure.ad_join_password)
+      ARM_CLIENT_ID: ${{ parameters.env[parameters.stage].ARM_CLIENT_ID }}
+      ARM_CLIENT_SECRET: ${{ parameters.env[parameters.stage].ARM_CLIENT_SECRET }}
+      ${{ insert }}: ${{ parameters.env['All'] }}
+      ${{ insert }}: ${{ parameters.env[parameters.stage] }}
+
