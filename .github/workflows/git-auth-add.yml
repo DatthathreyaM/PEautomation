@@ -1,0 +1,4 @@
+steps:
+  - script: |
+      git config --global "http.extraHeader" "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}"
+    displayName: Git Auth Config Add

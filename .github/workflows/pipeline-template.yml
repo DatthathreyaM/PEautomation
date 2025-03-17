@@ -1,0 +1,111 @@
+name: Terraform Deployment Pipeline
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+    branches:
+      - '**'
+  create:
+    branches:
+      - '**'
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    container:
+      image: ssppaps1arpscr1.azurecr.io/ubuntu2204-build-agent:latest
+      credentials:
+        username: ${{ secrets.AZURE_USERNAME }}
+        password: ${{ secrets.AZURE_PASSWORD }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Git auth configuration add
+        uses: ./.github/workflows/git-auth-add.yml
+
+      - name: Install Terraform
+        run: |
+          curl -fsSL https://releases.hashicorp.com/terraform/1.3.6/terraform_1.3.6_linux_amd64.zip -o terraform.zip
+          unzip terraform.zip
+          sudo mv terraform /usr/local/bin/
+
+      - name: Terraform Initialize
+        uses: ./.github/workflows/terraform-init.yml
+        with:
+          workingDirectory: ${{ github.workspace }}
+          stage: ${{ github.event.inputs.environment }}
+          env: ${{ fromJson(secrets.ENV_VARIABLES) }}
+          stateFile: ${{ github.event.inputs.subscription }}/$(basename ${{ github.workspace }}).tfstate
+
+      - name: Terraform Plan
+        uses: ./.github/workflows/terraform-plan.yml
+        with:
+          workingDirectory: ${{ github.workspace }}
+          stage: ${{ github.event.inputs.environment }}
+          env: ${{ fromJson(secrets.ENV_VARIABLES) }}
+          args: ""
+          planArgs: ""
+          artifactSecret: ${{ secrets.ENCRYPTION_KEY }}
+
+      - name: Git auth configuration remove
+        uses: ./.github/workflows/git-auth-remove.yml
+
+  apply:
+    name: Apply
+    runs-on: ubuntu-latest
+    container:
+      image: ssppaps1arpscr1.azurecr.io/ubuntu2204-build-agent:latest
+      credentials:
+        username: ${{ secrets.AZURE_USERNAME }}
+        password: ${{ secrets.AZURE_PASSWORD }}
+    needs: plan
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Git auth configuration add
+        uses: ./.github/workflows/git-auth-add.yml
+
+      - name: Install Terraform
+        run: |
+          curl -fsSL https://releases.hashicorp.com/terraform/1.3.6/terraform_1.3.6_linux_amd64.zip -o terraform.zip
+          unzip terraform.zip
+          sudo mv terraform /usr/local/bin/
+
+      - name: Download TF Plan Artifact
+        uses: actions/download-artifact@v2
+        with:
+          name: tfplan
+          path: .
+
+      - name: Decrypt Plan File
+        run: |
+          openssl enc -d -aes-256-cbc -in tfplan.enc -out tfplan -k ${{ secrets.ENCRYPTION_KEY }}
+
+      - name: Terraform Initialize
+        uses: ./.github/workflows/terraform-init.yml
+        with:
+          workingDirectory: ${{ github.workspace }}
+          stage: ${{ github.event.inputs.environment }}
+          env: ${{ fromJson(secrets.ENV_VARIABLES) }}
+          stateFile: ${{ github.event.inputs.subscription }}/$(basename ${{ github.workspace }}).tfstate
+
+      - name: Terraform Apply
+        uses: ./.github/workflows/terraform-apply.yml
+        with:
+          workingDirectory: ${{ github.workspace }}
+          stage: ${{ github.event.inputs.environment }}
+          env: ${{ fromJson(secrets.ENV_VARIABLES) }}
+          args: ""
+          stateFile: ${{ github.event.inputs.subscription }}/$(basename ${{ github.workspace }}).tfstate
+          artifactSecret: ${{ secrets.ENCRYPTION_KEY }}
+
+      - name: Git auth configuration remove
+        uses: ./.github/workflows/git-auth-remove.yml

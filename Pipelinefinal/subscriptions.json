@@ -1,0 +1,123 @@
+{
+    "subscriptions": [
+      {
+        "name": "dbse-p-1",
+        "id": "00000000-0000-0000-0000-000000000000",
+        "tenant_id": "0000000sh-0000-0000-0000-000000000000",
+        "vnets": [
+          {
+            "name": "dbse-p-vnet1",
+            "resource_group": "dbse-p-rg-1"
+          },
+          {
+            "name": "dbse-p-vnet2",
+            "resource_group": "dbse-p-rg-2"
+          },
+          {
+            "name": "dbse-p-vnet3",
+            "resource_group": "dbse-p-rg-3"
+          }
+        ]
+      },
+      {
+        "name": "dbse-n-1",
+        "id": "00000000-0000-0000-0000-000000000001",
+        "tenant_id": "0000000sh-0000-0000-0000-000000000000",
+        "vnets": [
+          {
+            "name": "dbse-n-vnet1",
+            "resource_group": "dbse-n-rg-1"
+          },
+          {
+            "name": "dbse-n-vnet2",
+            "resource_group": "dbse-n-rg-2"
+          },
+          {
+            "name": "dbse-n-vnet3",
+            "resource_group": "dbse-n-rg-3"
+          }
+        ]
+      },
+      {
+        "name": "dbsm-p-1",
+        "id": "00000000-0000-0000-0000-000000000002",
+        "tenant_id": "0000000sh-0000-0000-0000-000000000000",
+        "vnets": [
+          {
+            "name": "dbsm-p-vnet1",
+            "resource_group": "dbsm-p-rg-1"
+          },
+          {
+            "name": "dbsm-p-vnet2",
+            "resource_group": "dbsm-p-rg-2"
+          },
+          {
+            "name": "dbsm-p-vnet3",
+            "resource_group": "dbsm-p-rg-3"
+          }
+        ]
+      },
+      {
+        "name": "dbsm-n-1",
+        "id": "00000000-0000-0000-0000-000000000003",
+        "tenant_id": "0000000sh-0000-0000-0000-000000000000",
+        "vnets": [
+          {
+            "name": "dbsm-n-vnet1",
+            "resource_group": "dbsm-n-rg-1"
+          },
+          {
+            "name": "dbsm-n-vnet2",
+            "resource_group": "dbsm-n-rg-2"
+          },
+          {
+            "name": "dbsm-n-vnet3",
+            "resource_group": "dbsm-n-rg-3"
+          }
+        ]
+      },
+      {
+        "name": "Azure-p-1",
+        "id": "000azure-0000-0000-0000-0000dnszones1",
+        "tenant_id": "0000000sh-0000-0000-0000-000000000000",
+        "dnsZones": [
+          {
+            "name": "privatelink.blob.core.windows.net",
+            "resource_group": "Azure-p-100-azure-rg-100"
+          },
+          {
+            "name": "privatelink.file.core.windows.net",
+            "resource_group": "Azure-p-100-azure-rg-100"
+          },
+          {
+            "name": "privatelink.queue.core.windows.net",
+            "resource_group": "Azure-p-100-azure-rg-100"
+          },
+          {
+            "name": "privatelink.table.core.windows.net",
+            "resource_group": "Azure-p-100-azure-rg-100"
+          },
+          {
+            "name": "privatelink.web.core.windows.net",
+            "resource_group": "Azure-p-100-azure-rg-100"
+          },
+          {
+            "name": "privatelink.dfs.core.windows.net",
+            "resource_group": "Azure-p-100-azure-rg-100"
+          },
+          {
+            "name": "privatelink.documents.azure.com",
+            "resource_group": "Azure-p-100-azure-rg-100"
+          },
+          {
+            "name": "privatelink.mongo.cosmos.azure.com",
+            "resource_group": "Azure-p-100-azure-rg-100"
+          },
+          {
+            "name": "privatelink.vaultcore.azure.net",
+            "resource_group": "Azure-p-100-azure-rg-100"
+          }
+        ]
+      }
+    ]
+  }

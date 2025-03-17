@@ -1,0 +1,63 @@
+parameters:
+  - name: workingDirectory
+    type: string
+  - name: stage
+    type: string
+  - name: env
+    type: object
+  - name: args
+    type: string
+    default: ""
+  - name: planArgs
+    type: string
+    default: ""
+  - name: artifactSecret
+    type: string
+
+steps:
+  - pwsh: |
+      terraform plan -input=false ${{ parameters.args }} ${{ parameters.planArgs }} -out='plan_output_'$(Build.BuildNumber)_$(System.StageAttempt).tfpln
+      $plan = terraform show plan_output_$(Build.BuildNumber)_$(System.StageAttempt).tfpln
+      $plan = ($plan | Select-String "Plan:") -Replace "\[\d+(;\d+)?m" -Replace "\x1B"
+      Write-Host "##vso[task.logissue type=warning;]$plan"
+    displayName: Terraform Plan
+    workingDirectory: $(Build.SourcesDirectory)/${{ parameters.workingDirectory }}
+    env:
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+      AGENT_TEMP_DIRECTORY: $(Agent.TempDirectory)
+      BUILD_ID: $(Build.BuildId)
+      COMMIT_ID: $(Build.SourceVersion)
+      ARM_SKIP_PROVIDER_REGISTRATION: 1
+      ARM_TENANT_ID: $(azure.first_american_tenant_id)
+      TF_VAR_PA_ADMIN_USER_NAME: $(palo_alto.admin_user_name)
+      TF_VAR_PA_ADMIN_USER_PASSWORD: $(palo_alto.admin_user_password)
+      TF_VAR_AD_JOIN_USERNAME: $(azure.ad_join_username)
+      TF_VAR_AD_JOIN_PASSWORD: $(azure.ad_join_password)
+      ARM_CLIENT_ID: ${{ parameters.env[parameters.stage].ARM_CLIENT_ID }}
+      ARM_CLIENT_SECRET: ${{ parameters.env[parameters.stage].ARM_CLIENT_SECRET }}
+      TF_BACKEND_STORAGE_ACCOUNT: "AZURECENGSA50"
+      TF_BACKEND_CONTAINER_NAME: "tfstate"
+      TF_BACKEND_KEY: "${{ parameters.env[parameters.stage] }}/$(basename ${{ parameters.workingDirectory }}).tfstate"
+
+  - pwsh: |
+      openssl enc -aes-256-cbc -md sha512 -pbkdf2 -iter 100000 -salt -in 'plan_output_$(Build.BuildNumber)_$(System.StageAttempt).tfpln' -out 'plan_output_$(Build.BuildNumber)_$(System.StageAttempt).tfpln.enc' -k '${{ parameters.artifactSecret }}'
+    displayName: Encrypt Plan File
+    workingDirectory: $(Build.SourcesDirectory)/${{ parameters.workingDirectory }}
+
+  - pwsh: |
+      remove-item -path 'plan_output_$(Build.BuildNumber)_$(System.StageAttempt).tfpln'
+    displayName: Remove Unsecured Plan File
+    workingDirectory: $(Build.SourcesDirectory)/${{ parameters.workingDirectory }}
+
+  - task: CopyFiles@2
+    displayName: Copy Files for Artifact
+    inputs:
+      SourceFolder: $(Build.SourcesDirectory)/${{ parameters.workingDirectory }}
+      Contents: 'plan_output_$(Build.BuildNumber)_$(System.StageAttempt).tfpln.enc'
+      TargetFolder: '$(Build.ArtifactStagingDirectory)'
+
+  - task: PublishPipelineArtifact@1
+    displayName: Publish Artifact TFPlan
+    inputs:
+      targetPath: '$(Build.ArtifactStagingDirectory)'
+      artifactName: "tfplan_$(Build.BuildNumber)_$(System.StageAttempt)"

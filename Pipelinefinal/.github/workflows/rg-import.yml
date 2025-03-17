@@ -1,0 +1,86 @@
+name: Import Resource Groups
+
+on:
+  workflow_dispatch:
+    inputs:
+      subscription_name:
+        description: 'Subscription Name (e.g., dbse-p-1, dbse-n-1)'
+        required: true
+      resource_group_name:
+        description: 'Resource Group Name (leave empty to import all RGs in the subscription)'
+        required: false
+
+jobs:
+  import_rgs:
+    runs-on: ubuntu-latest
+    container:
+      image: ssppaps1arpscr1.azurecr.io/ubuntu2204-build-agent:latest
+      credentials:
+        username: ${{ secrets.AZURE_USERNAME }}
+        password: ${{ secrets.AZURE_PASSWORD }}
+    env:
+      ARM_SKIP_PROVIDER_REGISTRATION: true
+      SYSTEM_ACCESSTOKEN: ${{ secrets.SYSTEM_ACCESSTOKEN }}
+      AGENT_TEMP_DIRECTORY: ${{ runner.temp }}
+      BUILD_ID: ${{ github.run_id }}
+      COMMIT_ID: ${{ github.sha }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Git authentication
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          git remote set-url origin https://${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v1
+        with:
+          terraform_version: 1.3.6
+
+      - name: Install Azure CLI
+        run: |
+          curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+          az --version
+
+      - name: Determine Environment
+        id: determine_env
+        run: |
+          if [[ "${{ github.event.inputs.subscription_name }}" =~ ^(dbse-p-1|dbsm-p-1) ]]; then
+            echo "ENVIRONMENT=prod" >> $GITHUB_ENV
+          elif [[ "${{ github.event.inputs.subscription_name }}" =~ ^(dbse-n-1|dbsm-n-1) ]]; then
+            echo "ENVIRONMENT=non-prod" >> $GITHUB_ENV
+          else
+            echo "ENVIRONMENT=unknown" >> $GITHUB_ENV
+          fi
+
+      - name: Configure Azure credentials (Prod)
+        if: env.ENVIRONMENT == 'prod'
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.SP_AZURE_DNAE_PROD }}
+
+      - name: Configure Azure credentials (Non-Prod)
+        if: env.ENVIRONMENT == 'non-prod'
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.SP_AZURE_DNAE_NPROD }}
+
+      - name: Run import_rgs.sh script
+        run: |
+          chmod +x ./scripts/import_rgs.sh
+          ./scripts/import_rgs.sh "${{ github.event.inputs.subscription_name }}" "${{ github.event.inputs.resource_group_name }}"
+
+      - name: Commit and push changes
+        run: |
+          git add .
+          git commit -m "Imported resource groups into Terraform state"
+          git push origin main
+
+      - name: Remove Git authentication
+        run: |
+          git remote set-url origin https://github.com/${{ github.repository }}.git
+
+      - name: Logout from Azure
+        run: az logout
