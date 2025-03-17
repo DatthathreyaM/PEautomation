@@ -75,7 +75,7 @@ jobs:
       - name: Commit and push changes
         run: |
           git add .
-          git commit -m "Imported resource groups into Terraform state"
+          git commit -m "[RG-IMPORT] Imported resource groups into Terraform state"
           git push origin main
 
       - name: Remove Git authentication

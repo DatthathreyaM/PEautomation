@@ -6,6 +6,8 @@ on:
       - main
     paths:
       - 'terraform/configurations/**/*'
+    paths-ignore:
+      - 'terraform/configurations/**/resource_group.json'  # Ignore changes to resource_group.json
 
 jobs:
   apply:
